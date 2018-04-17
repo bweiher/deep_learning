@@ -18,13 +18,13 @@ FLAGS <- flags(
 
 # https://tensorflow.rstudio.com/blog/keras-customer-churn.html
 
-use_condaenv('r-tensorflow')
+#use_condaenv('r-tensorflow')
 
 # url <- 'https://raw.githubusercontent.com/treselle-systems/customer_churn_analysis/master/WA_Fn-UseC_-Telco-Customer-Churn.csv'
 # churn_data_raw <- read_csv(url)
 # write_csv(churn_data_raw, "data/ibm_telco.csv")
 
-churn_data_raw <- read_csv("ibm_telco.csv")
+churn_data_raw <- read_csv("../data/customer_churn/ibm_telco.csv")
 
 # # Remove unnecessary data
 churn_data_tbl <- churn_data_raw %>%
