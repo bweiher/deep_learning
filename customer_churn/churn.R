@@ -109,7 +109,14 @@ y_test_vec  <- ifelse(pull(test_tbl, Churn) == "Yes", 1, 0)
 
 
 # Building our Artificial Neural Network
-model_keras <- keras_model_sequential()
+model  <- keras_model_sequential()
+
+
+m <- max(x_train_tbl$MonthlyCharges)
+
+model %>% layer_embedding(m, m/max(m))
+
+
 
 model_keras %>% 
   

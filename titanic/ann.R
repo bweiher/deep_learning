@@ -115,6 +115,7 @@ testing <- testing(sd)
 # Create recipe
 rec <- recipe(survived ~ ., data = train) %>% 
  # step_log(fare) %>% 
+  step_rm(name) %>% 
   step_meanimpute(fare) %>% 
   step_discretize(fare, options = list(cuts = 4)) %>% 
   step_meanimpute(age) %>% 
@@ -132,7 +133,7 @@ x_test_tbl  <- #tryCatch(
 
 
 
-if(!is.na(x_test_tbl)){
+#if(!is.na(x_test_tbl)){
   
 
 
@@ -183,7 +184,7 @@ model_keras <- keras_model_sequential() %>%
 
 
 # Fit the keras model to the training data
-history <- fit(
+fit(
   object           = model_keras, 
   x                = as.matrix(x_train_tbl), 
   y                = y_train_vec,
@@ -231,8 +232,10 @@ tibble(
   )# %>% 
   #write_csv('data.csv')
 
-#colnames(test) <- colnames(test) %>% str_to_lower()
+colnames(test) <- colnames(test) %>% str_to_lower()
 unseen_data <- bake(rec, newdata = get_comp_data_ready(test)) 
+
+
 
 # Predicted Class
 yhat_keras_class_vec <- predict_classes(object = model_keras, x = as.matrix(unseen_data)) %>%
