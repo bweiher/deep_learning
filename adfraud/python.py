@@ -96,24 +96,37 @@ in_app = Input(shape=[1], name = 'app')
 emb_app = Embedding(max_app, emb_n)(in_app)
 in_ch = Input(shape=[1], name = 'ch')
 emb_ch = Embedding(max_ch, emb_n)(in_ch)
+
+em
 in_dev = Input(shape=[1], name = 'dev')
 emb_dev = Embedding(max_dev, emb_n)(in_dev)
 in_os = Input(shape=[1], name = 'os')
 emb_os = Embedding(max_os, emb_n)(in_os)
+
+
 in_h = Input(shape=[1], name = 'h')
 emb_h = Embedding(max_h, emb_n)(in_h) 
+
+
 in_d = Input(shape=[1], name = 'd')
 emb_d = Embedding(max_d, emb_n)(in_d) 
 in_wd = Input(shape=[1], name = 'wd')
 emb_wd = Embedding(max_wd, emb_n)(in_wd) 
+
+
+
 in_qty = Input(shape=[1], name = 'qty')
 emb_qty = Embedding(max_qty, emb_n)(in_qty) 
+
+
 in_c1 = Input(shape=[1], name = 'c1')
 emb_c1 = Embedding(max_c1, emb_n)(in_c1) 
 in_c2 = Input(shape=[1], name = 'c2')
 emb_c2 = Embedding(max_c2, emb_n)(in_c2) 
+
 fe = concatenate([(emb_app), (emb_ch), (emb_dev), (emb_os), (emb_h), 
                  (emb_d), (emb_wd), (emb_qty), (emb_c1), (emb_c2)])
+                 
 s_dout = SpatialDropout1D(0.2)(fe)
 x = Flatten()(s_dout)
 x = Dropout(0.2)(Dense(dense_n,activation='relu')(x))
