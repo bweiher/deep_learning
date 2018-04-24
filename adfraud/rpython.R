@@ -1,18 +1,47 @@
+# TODO 
+# ~ use whole dataset
+# ~ hyper param tuning
+# ~ cross validation
+
+
 library(keras)
 library(data.table)
 library(tidyverse)
-library(reticulate)
-use_condaenv("r-reticulate")
+library(yardstick)
+
+use_condaenv("r-tensorflow")
 
 d <- fread("../data/adfraud/train.csv",
+                       header=TRUE,
                        drop = c("attributed_time"),
-                       colClasses=list(numeric=1:5),  
+                       colClasses = c(rep("integer", 5), rep("character",2), "integer"),
                        col.names = c("ip", "app", "device", "os", "channel", "click_time", "is_attributed")
                  )[(.N - 50e6):.N] 
 
 
+setDT()
 
-d[, yday := yday(click_time)]
+nrows <- d[,.N]
+chunks <- nrows / 19
+its  <-  nrows / chunks
+
+for(g in seq_along(1:its)){
+   if(g == 1){
+    row_min <- 1L
+    row_max <- chunks 
+    d[c(row_min:row_max), yday := yday(click_time)]
+  } else {
+    row_max <- chunks * g
+    row_min <- chunks * (g - 1L)
+    d[c(row_min:row_max), yday := yday(click_time)]
+  }
+}
+
+
+
+d[1:100000, yday := yday(click_time)]
+
+
 d[, hour := hour(click_time)]
 d[, day := wday(click_time)]
 
@@ -146,7 +175,7 @@ epochs = 2
     y = train_y,
     batch_size = 20000,
     verbose = 2, 
-    shufflue = TRUE,
+    shuffle = TRUE,
     epochs = 2 ,
     validation_split = 0.2
     )
@@ -178,7 +207,7 @@ estimates <- tibble(
   class_prob = predictions$probs
 )
 
-library(yardstick)
+
 
 tibble(
   accuracy = estimates %>% metrics(truth, estimate) %>% pull(accuracy),
@@ -225,3 +254,5 @@ test_preds <- data.table(
 test_preds[, is_attributed := ifelse(probs > 0.5, 1L, 0L)]
 test_preds[, click_id := .I - 1L]
 test_preds %>% select(click_id, is_attributed) %>% fwrite("../data/adfraud/sub2.csv")
+
+test_preds[,.N] == 18790469L
