@@ -1,5 +1,4 @@
 # TODO 
-# ~ use whole dataset
 # ~ hyper param tuning
 # ~ cross validation
 library(keras)
@@ -7,7 +6,6 @@ library(data.table)
 library(tidyverse)
 library(yardstick)
 library(fasttime)
-library(tictoc)
 library(reticulate)
 
 
@@ -18,7 +16,7 @@ FLAGS <- flags(
 )
 
 
-tic()
+start_time <- Sys.time()
 use_condaenv("r-tensorflow")
 
 
@@ -32,7 +30,6 @@ train <- fread("../data/adfraud/train.csv",
                        colClasses = c(rep("integer", 5), rep("character",2), "integer"),
                        col.names = c("ip", "app", "device", "os", "channel", "click_time", "is_attributed")
                  )[121886955L:.N]
-
 
 test <- fread("../data/adfraud/test.csv", 
               header=TRUE,
@@ -85,6 +82,7 @@ for(g in seq_along(inputs)){
 train <- d[!is.na(is_attributed)]
 
 # create validation set
+# TODO cv , better sampling
 set.seed(123)
 t_nrows <- train[,.N] * 0.85
 train[, rn := .I]
@@ -96,17 +94,15 @@ rm(train) ; gc()
 validation[, rn :=  NULL]
 training[, rn := NULL]
 
-training[, .(.N, sum(is_attributed))][, V2/N]
-validation[, .(.N, sum(is_attributed))][, V2/N]
+# training[, .(.N, sum(is_attributed))][, V2/N]
+# validation[, .(.N, sum(is_attributed))][, V2/N]
 
-
+# get y and remove from dataframe
 training_y <- training[,is_attributed]
-
-
 training[, is_attributed := NULL]
 
-# kaggle test set 
-test <- d[is.na(is_attributed)][, is_attributed :=  NULL]
+# # kaggle test set 
+kaggle_test_data <- d[is.na(is_attributed)][, is_attributed :=  NULL]
 rm(d) ; gc()
 
 
@@ -144,7 +140,7 @@ epochs <- 2
  
 history <- fit(
     object = model, 
-    x = map(validation, as.vector),
+    x = map(training, as.vector), # this becomes a numpy array w/ reticulate transformation
     y = training_y,
     batch_size = batch_size,
     class_weight = list("0"=0.01, "1"=0.99),
@@ -193,11 +189,11 @@ metrics <- map_df(seq(0.2, 0.9, .1), function(x){
 )
 
 
-  x <- toc()
+  end_time <- Sys.time()
  
   metrics %>% 
    mutate(
-     time_mins = as.numeric(x$toc - x$tic) / 60
+     time_mins = as.numeric(difftime(end_time, start_time, units='mins'))
   ) %>% 
     write_csv("metrics.csv")
 
