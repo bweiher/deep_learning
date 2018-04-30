@@ -7,12 +7,13 @@ library(tidyverse)
 library(yardstick)
 library(fasttime)
 library(reticulate)
-
+library(caret)
 
 predict_for_kaggle <- FALSE
 
 FLAGS <- flags(
-  flag_numeric("n", 1000)
+  flag_numeric("n", 1024),
+  flag_numeric("emb_n", 50)
 )
 
 
@@ -46,19 +47,22 @@ rm(test, train) ; gc()
 
 
 # transform and build features
-d[, click_time := fastPOSIXct(click_time)]
+d[, click_time := fastPOSIXct(click_time,"GMT")]
 d[, hour := hour(click_time)]
 d[, day := wday(click_time)]
-d[, qty :=  .N, by = .(ip, day, hour) ]
+d[, yday := yday(click_time) ]
+d[, qty :=  .N, by = .(ip, yday, hour) ]
 d[, ip_app_count := .N , by = .(ip, app)]
-d[, ip_app_os_count := .N , by = .(ip, app, os, channel)]
+d[, ip_app_os_count := .N , by = .(ip, app, os)]
 
 # drop redundant cols
 drop_colz <- c("click_time", "ip")
 d[, (drop_colz) := NULL]
 
+
+
 # params for nn
-emb_n <- 50
+emb_n <- FLAGS$emb_n
 dense_n <- FLAGS$n
 
 
@@ -125,19 +129,21 @@ model <- keras_model(inputs =  layer_input_list, outputs = predictions)
 batch_size <- 20000
 epochs <- 2
 
-  # source_python("exp_decay.py")
-  # steps <- as.integer(nrow(train) / batch_size) * epochs
+   source_python("exp_decay.py")
+   steps <- as.integer(nrow(training) / batch_size) * epochs
   
 
 
   model %>% 
-    compile(optimizer = "adam",
-              #optimizer_adam(lr = 0.001,decay = exp_decay(init=0.001, fin=0.0001, steps=steps)),
+    compile(optimizer = #"adam", 
+              optimizer_adam(lr = 0.001, decay = exp_decay(init=0.001, fin=0.0001, steps=steps)),
               loss = 'binary_crossentropy',
               metrics = c("accuracy")
     )
 
  
+py_dict(keys=c(0,1), values=c(0.01,0.99))  
+  
 history <- fit(
     object = model, 
     x = map(training, as.vector), # this becomes a numpy array w/ reticulate transformation
@@ -165,8 +171,9 @@ options(yardstick.event_first = FALSE)
 
 # calculate metrics  
 
-metrics <- map_df(seq(0.2, 0.9, .1), function(x){
-    
+#metrics <- map_df(seq(0.2, 0.9, .1), function(x){
+x <-  0.5    
+
     estimates <- tibble(
       class_prob = test_preds,
       truth =  as.factor(y_validation),
@@ -185,8 +192,8 @@ metrics <- map_df(seq(0.2, 0.9, .1), function(x){
         threshold = x
       )
     
-  }
-)
+ # }
+#)
 
 
   end_time <- Sys.time()
@@ -200,3 +207,15 @@ metrics <- map_df(seq(0.2, 0.9, .1), function(x){
 
 rm(d) ; gc()
 
+
+# write to kaggle
+
+kaggle_preds <- predict(model, map(kaggle_test_data, as.vector), batch_size=batch_size, verbose=2) %>%
+  as.vector()
+
+
+data.table(
+  is_attributed = kaggle_preds
+)[, click_id := .I - 1L] %>% 
+  select(click_id, is_attributed) %>% 
+  fwrite("sub8.csv")

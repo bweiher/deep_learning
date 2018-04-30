@@ -4,7 +4,8 @@ library(tfruns)
 
 # run various combinations of dropout1 and dropout2
 runs <- tuning_run("rpython.R", flags = list(
-  n = c(1000, 2000, 4000)
+  n = c(1024),
+  emb_n = c(50)
 ))
 
 
@@ -15,10 +16,12 @@ run_dirs <- list.files('runs')
 run_metrics <- map_df(run_dirs, function(x){
   
   x <- paste0("runs/", x, "/metrics.csv")
+  if(file.exists(x)){
   read_csv(x) %>% 
     mutate(
       run_dir = str_replace_all(x, "/metrics.csv", "")
     )
+  }
   
   
 })
