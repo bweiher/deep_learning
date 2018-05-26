@@ -9,7 +9,7 @@ library(fasttime)
 library(reticulate)
 library(caret)
 # library(R6)
-# library(lightgbm)
+ library(lightgbm)
 # library(recipes)
 
 # try Keras or lightgbm!
@@ -23,24 +23,24 @@ FLAGS <- flags(
 )
 
 
-start_time <- Sys.time()
-use_condaenv("tf")
+
+use_condaenv("r-tensorflow")
 
 
 #setwd('deep_learning/adfraud/')
 # read in train and test datasets
-train <- fread("../data/adfraud/train.csv",
+train <- fread("data/train.csv",
                        header=TRUE, 
                        showProgress = FALSE,
                        drop = c("attributed_time"),
                        colClasses = c(rep("integer", 5), rep("character",2), "integer"),
                        col.names = c("ip", "app", "device", "os", "channel", "click_time", "is_attributed")
-                 )[121886955L:.N]
+                 )#[121886955L:.N]
 
 #train <- train[sample(10000)]
 #d <- train
 
-test <- fread("../data/adfraud/test.csv", 
+test <- fread("data/test.csv", 
               header=TRUE,
               showProgress = FALSE,
               drop = c("click_id"),
@@ -84,7 +84,7 @@ d[, device := xformer(device)]
 d[, os := xformer(os)]
 d[, channel := xformer(channel)]
 d[, hour := xformer(hour)]
-
+d[, day := xformer(day)]
 
 
 # d[, (colnames(df)) := NULL]
@@ -94,7 +94,9 @@ d[, hour := xformer(hour)]
 # re-separate dfs 
 train <- d[!is.na(is_attributed)]
 
-
+# # kaggle test set 
+kaggle_test_data <- d[is.na(is_attributed)][, is_attributed :=  NULL]
+rm(d) ; gc()
 
 # lightgbm  #### 
 #run_light_gbm <- TRUE
@@ -103,63 +105,84 @@ train <- d[!is.na(is_attributed)]
 # if(isTRUE(run_light_gbm)){}
 # 
 # 
-# cats <- c("app", "device", "os", "channel", "hour")
-# 
-# training <- as.matrix(training)
-# training_data <- lgb.Dataset(data = training, 
-#                              label = training_y, 
-#                      categorical_feature = cats)
-# 
-# 
-# cat("Creating the 'dvalid' for modeling...")
-# validation <- as.matrix(validation)
-# validation_data <- lgb.Dataset(data = validation, 
-#                      label = validation_y, 
-#                      categorical_feature = cats)
-# 
-# 
-# # lgb.Dataset.save(training_data, "training.buffer")  
-# #lgb.Dataset.save(validation_data, "validation.buffer")
-# 
-# # rm(training, validation) ; gc()
-# # params for model
-# 
-# params <- list(objective = "binary", 
-#               metric = "auc", 
-#               learning_rate= 0.1,
-#               num_leaves= 7,
-#               max_depth= 4,
-#               device = "gpu",
-#               gpu_platform_id = 1,
-#               gpu_device_id = 1,
-#               nthread = 1,
-#               min_child_samples= 100,
-#               max_bin= 100,
-#               subsample= 0.7, 
-#               subsample_freq= 1,
-#               colsample_bytree= 0.7,
-#               min_child_weight= 0,
-#               min_split_gain= 0,
-#               scale_pos_weight= 99.7)
-# 
-# 
-# model <- lgb.train(params = params, 
-#                    data = training_data, 
-#                    valids = list(validation = validation_data),
-#                    nrounds = 1500, 
-#                    verbose= 1, 
-#                    early_stopping_rounds = 10, 
-#                    eval_freq = 25)
+cats <- c("app", "device", "os", "channel", "hour", "day")
+
+
+# split for model fitting and validation
+set.seed(123) # reproduce
+
+train_index <- createDataPartition(train[,is_attributed], p = 0.9, list = FALSE)
+training <- train[train_index, ]
+validation <- train[-train_index,]
+rm(train) ; gc()
+
+# props 
+training[, .(.N, sum(is_attributed))][, V2/N]
+validation[, .(.N, sum(is_attributed))][, V2/N]
+
+# get y and remove from dataframe
+training_y <- training[,is_attributed]
+training[, is_attributed := NULL]
+
+validation_y <- validation[,is_attributed]
+validation[, is_attributed := NULL]
+
+
+training <- as.matrix(training)
+training_data <- lgb.Dataset(data = training,
+                             label = training_y,
+                     categorical_feature = cats)
+
+
+cat("Creating the 'dvalid' for modeling...")
+validation <- as.matrix(validation)
+validation_data <- lgb.Dataset(data = validation,
+                     label = validation_y,
+                     categorical_feature = cats)
+
+
+# lgb.Dataset.save(training_data, "training.buffer")
+#lgb.Dataset.save(validation_data, "validation.buffer")
+
+# rm(training, validation) ; gc()
+# params for model
+
+params <- list(objective = "binary",
+              metric = "auc",
+              learning_rate= 0.1,
+              num_leaves= 7,
+              max_depth= 4,
+              # device = "gpu",
+              # gpu_platform_id = 1,
+              # gpu_device_id = 1,
+              nthread = 16,
+              min_child_samples= 100,
+              max_bin= 100,
+              subsample= 0.7,
+              subsample_freq= 1,
+              colsample_bytree= 0.7,
+              min_child_weight= 0,
+              min_split_gain= 0,
+              scale_pos_weight= 99.7)
+
+
+model <- lgb.train(params = params,
+                   data = training_data,
+                   valids = list(validation = validation_data),
+                   nrounds = 1500,
+                   verbose= 1,
+                   early_stopping_rounds = 10,
+                   eval_freq = 25)
 # 
 # # Try to find split_feature: 11
 # # If you find it, it means it used a categorical feature in the first tree
 # lgb.dump(model, num_iteration = 1)
 # 
 # 
-# cat("Validation AUC @ best iter: ", max(unlist(model$record_evals[["validation"]][["auc"]][["eval"]])), "\n\n")
+ cat("Validation AUC @ best iter: ", max(unlist(model$record_evals[["validation"]][["auc"]][["eval"]])), "\n\n")
 
 
-# preds <- predict(model, data = as.matrix(kaggle_test_data, n = model$best_iter))
+ preds <- predict(model, data = as.matrix(kaggle_test_data, n = model$best_iter))
 
 # from sklearn.preprocessing import LabelEncoder
 
@@ -204,8 +227,8 @@ model <- keras_model(inputs =  layer_input_list, outputs = predictions)
 batch_size <- 20000
 epochs <- 2
 
-   source_python("exp_decay.py")
-   steps <- as.integer(nrow(train) / batch_size) * epochs
+source_python("exp_decay.py")
+steps <- as.integer(nrow(train) / batch_size) * epochs
   
 
 
@@ -220,29 +243,7 @@ epochs <- 2
  # py_dict(keys=c(0,1), values=c(0.01,0.99))  
   
   
-  # split for model fitting and validation
-  set.seed(123) # reproduce
-  
-  train_index <- createDataPartition(train[,is_attributed], p = 0.9, list = FALSE)
-  training <- train[train_index, ]
-  validation <- train[-train_index,]
-  
-  
-  
-  # # kaggle test set 
-  kaggle_test_data <- d[is.na(is_attributed)][, is_attributed :=  NULL]
-  rm(d,train) ; gc()
-  
-  training[, .(.N, sum(is_attributed))][, V2/N]
-  validation[, .(.N, sum(is_attributed))][, V2/N]
-  
-  # get y and remove from dataframe
-  training_y <- training[,is_attributed]
-  training[, is_attributed := NULL]
-  
-  validation_y <- validation[,is_attributed]
-  validation[, is_attributed := NULL]
-  
+ 
   
   
   
@@ -260,8 +261,7 @@ history <- fit(
 
 
 # make predictions on the validation dataset withheld from training
-y_validation <- validation[, is_attributed]
-validation[, is_attributed := NULL]
+
 
 test_preds <- predict(model, map(validation, as.vector), batch_size=batch_size, verbose=2) %>%
   as.vector()
@@ -278,7 +278,7 @@ x <-  0.5
 
     estimates <- tibble(
       class_prob = test_preds,
-      truth =  as.factor(y_validation),
+      truth =  as.factor(validation_y),
       estimate = as.factor(ifelse(class_prob > x, 1L, 0))
     )
     
@@ -296,15 +296,15 @@ x <-  0.5
     
  # }
 #)
+  estimates %>% roc_auc(truth, class_prob)
 
-
-  end_time <- Sys.time()
- 
-  metrics %>% 
-   mutate(
-     time_mins = as.numeric(difftime(end_time, start_time, units='mins'))
-  ) %>% 
-    write_csv("metrics.csv")
+  # end_time <- Sys.time()
+  # 
+  # metrics %>% 
+  #  mutate(
+  #    time_mins = as.numeric(difftime(end_time, start_time, units='mins'))
+  # ) %>% 
+  #   write_csv("metrics.csv")
 
 
 rm(d) ; gc()

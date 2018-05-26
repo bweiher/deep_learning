@@ -1,3 +1,4 @@
+# begin ----
 library(tidyverse)
 library(h2o)
 library(corrr)
@@ -7,7 +8,8 @@ library(recipes)
 file <- 'attrition.xlsx'
 
 d <- readxl::read_excel(file)
-dict <- readxl::read_excel(file, sheet = 2, col_names = F) 
+
+readxl::read_excel(file, sheet = 2, col_names = F) %>% View("dictionary")
 skimr::skim(d)
 
 # find useless cols with 1 distinct value or all unique values
@@ -20,9 +22,14 @@ distincts <- d %>%
 
 distincts %>% print(n=Inf)
 
+
+
 remove_cols <- distincts %>% 
   filter(value == 1 | value == nrow(d)) %>% # in recipes step_zv gets the val == 1 
   pull(key)  
+
+
+remove_cols
 
 cols <- setdiff(colnames(d), remove_cols)
 d <- select(d, cols) %>% 
@@ -52,6 +59,9 @@ corr %>%
 # look at some of the interesting features
 # overtime
 corr %>% filter(rowname=="OverTime")
+
+
+
 d %>% 
   select(Attrition, OverTime) %>% 
   group_by_all() %>% 
@@ -73,8 +83,7 @@ corr %>% filter(rowname=="TotalWorkingYears")
 d %>% 
   ggplot(aes(x=TotalWorkingYears)) +
   geom_density() +
-  facet_wrap(~Attrition, ncol=1L) +
-  labs(title = "Total Working Years is Correlated w/ Attrition")
+  facet_wrap(~Attrition, ncol=1L) 
 
   # Marital Status
 corr %>% filter(rowname=="MaritalStatus")
@@ -92,12 +101,13 @@ d %>%
 
 
 
+corr %>% filter(rowname=="JobSatisfaction")
+
+
 
 # model building and data prep/preprocessing  ------ 
 
-
-
-# convert other 
+# convert chr to factor
 data <- d %>% 
   mutate_if(is.character, as.factor) %>% 
   select(Attrition, everything()) 
@@ -116,7 +126,7 @@ baked_data <- bake(recipe, newdata = data)
 baked_data %>% ggplot(aes(x=Attrition, y=TotalWorkingYears)) + geom_jitter() + geom_boxplot()
 data %>% ggplot(aes(x=Attrition, y=TotalWorkingYears)) + geom_jitter() + geom_boxplot()
 
-
+# view transformations ~ centered/scaled
 list(baked_data, data) %>% 
   map_df(
     ~select_if(., is.numeric) %>% 
@@ -129,7 +139,9 @@ h2o.init() # initialize h2o cluster
 # view flow at 127.0.0.1:54321
 
 h2o_data <- as.h2o(baked_data)
-split <- h2o.splitFrame(h2o_data, c(0.65, 0.175), seed = 123L)
+h2o.describe(h2o_data)
+
+split <- h2o.splitFrame(h2o_data, c(0.6, 0.2), seed = 12345L)
 train <- h2o.assign(split[[1]], "train" ) 
 valid <- h2o.assign(split[[2]], "valid" ) 
 test  <- h2o.assign(split[[3]], "test" )  
@@ -141,9 +153,9 @@ x <- d %>% select(-Attrition) %>% colnames
 models <- h2o.automl(
   x = x, 
   y = "Attrition",
-  training_frame    = train,
-  validation_frame = valid,
-  leaderboard_frame = test,
+  training_frame    = h2o_data,
+  # validation_frame =  valid,
+  # leaderboard_frame = test,
   max_runtime_secs  = 45
 )
 
@@ -154,9 +166,19 @@ models@leaderboard %>%
 
 top_model <- models@leader
 
+# Get model ids for all models in the AutoML Leaderboard
+model_ids <- as.data.frame(models@leaderboard$model_id)[,1]
+# Get the "All Models" Stacked Ensemble model
+se <- h2o.getModel(grep("StackedEnsemble_AllModels", model_ids, value = TRUE)[1])
+# Get the Stacked Ensemble metalearner model
+metalearner <- h2o.getModel(se@model$metalearner$name)
+
+
+
+metalearner <- h2o.getModel(models@model$metalearner$name)
 
 # make predictions on test dataset
-pred_h2o <- h2o.predict(object = models, newdata = test)
+pred_h2o <- h2o.predict(object = top_model, newdata = test)
 
 
 # get predictions and truth for test dataset
@@ -260,6 +282,29 @@ roc_data %>%
   geom_point(data = filter(roc_data, max==TRUE), aes(x=fpr, y=tpr),  shape = 3, size = 3)
 
 
+# precision and recall by threshold
+h2o.precision(perf) %>% 
+  full_join(h2o.recall(perf)) %>% 
+  as_tibble() %>% 
+  gather(key, value, -threshold) %>% 
+  ggplot(aes(
+    x = threshold,  y = value, color = key 
+  )) +
+  geom_line() +
+  geom_vline(xintercept = threshold_val, linetype = 2)
+
+
+# http://www.saedsayad.com/model_evaluation_c.htm
+# https://www.analyticsvidhya.com/blog/2016/02/7-important-model-evaluation-error-metrics/
+
+# lift chart
+h2o.gainsLift(perf) %>% 
+  ggplot(aes(x =cumulative_data_fraction , y=lift )) +
+  geom_line() +
+  geom_point() + 
+  geom_hline(yintercept = 0, color = "red")
+
+
 # other model metrics
 perf@metrics$AUC
 h2o.auc(perf) # area under the curve, perfect classification = 1.0
@@ -273,17 +318,9 @@ h2o.auc(perf) # area under the curve, perfect classification = 1.0
 
 
 
- # expain model predictions ----
-class(top_model)
-
-
-# Test our predict_model() function
-predict_model(x = top_model, newdata = as.data.frame(test[,-1]), type = 'raw') %>%
-  tibble::as_tibble()
-
-# Run lime() on training set
+# Run lime
 explainer <- lime::lime(
-  as.data.frame(train[,-1]), 
+  as.data.frame(test[,-1]), 
   model          = top_model, 
   bin_continuous = FALSE)
 
@@ -296,13 +333,8 @@ explanation <- lime::explain(
   n_features   = 6,
   kernel_width = 0.5)
 
-plot_features(explanation) +
-  labs(title = "HR Predictive Analytics: LIME Feature Importance Visualization",
-       subtitle = "Hold Out (Test) Set, First 10 Cases Shown")
-
-plot_explanations(explanation) +
-  labs(title = "LIME Feature Importance Heatmap",
-       subtitle = "Hold Out (Test) Set, First 10 Cases Shown")
+plot_features(explanation) 
+plot_explanations(explanation) 
 
 
 # analyze features from lime -----
@@ -313,8 +345,6 @@ feats <- d %>%
   mutate(Case = row_number()) %>% 
   select(Case, everything()) %>%   
   mutate_if(is.character, as.factor)
-
-
 feats %>% 
   ggplot(aes(
     x = Attrition, y= JobSatisfaction
@@ -323,12 +353,4 @@ feats %>%
   geom_violin()
 
 
-feats %>% 
-  ggplot(aes(x=JobSatisfaction)) +
-  geom_density() +
-  facet_wrap(~Attrition, ncol=1L)
 
-
-feats %>% 
- group_by(OverTime) %>% 
- countp(Attrition)
